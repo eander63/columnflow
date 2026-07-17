@@ -1,0 +1,3 @@
+Vendored from columnflow/columnflow at approximately tag v0.2.4 (see git remote 'upstream').
+Snapshot flattened to a single commit; no shared ancestry with upstream.
+To pull an upstream fix: git fetch upstream && git cherry-pick -x <sha>
