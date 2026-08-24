@@ -120,7 +120,7 @@ def electron_weights_setup(
     self.electron_sf_corrector = correction_set[corrector_name]
 
     # check versions
-    if self.electron_sf_corrector.version not in (2, 3):
+    if self.electron_sf_corrector.version not in (2, 3, 4, 5):
         raise Exception(
             f"unsuppprted electron sf corrector version {self.electron_sf_corrector.version}",
         )
