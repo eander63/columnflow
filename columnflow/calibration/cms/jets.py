@@ -653,10 +653,31 @@ def jer(self: Calibrator, events: ak.Array, **kwargs) -> ak.Array:
 
     # JER scale factors and systematic variations
     jersf = {}
-    for syst in ("nom", "up", "down"):
-        variable_map_syst = dict(variable_map, systematic=syst)
-        inputs = [variable_map_syst[inp.name] for inp in self.evaluators["sf"].inputs]
-        jersf[syst] = ak_evaluate(self.evaluators["sf"], *inputs)
+    if self.has_sfunc_evaluator:
+        # new layout: nominal from ScaleFactor, variations from SFUncertainty.
+        # The uncertainty is ABSOLUTE, i.e. up = sf + unc, down = sf - unc.
+        #
+        # Verified against the POG's own nom/up/down for this campaign: on the 546
+        # (eta, pt) points where the JRV1 and JRV2 nominal scale factors agree
+        # exactly, the additive form reproduces the POG up/down to 0.002 (rounding),
+        # while the multiplicative form sf * (1 +- unc) is off by up to 0.2.
+        #
+        # NOTE: this differs from upstream columnflow, which uses the
+        # multiplicative form. The JME convention appears to have changed; if a
+        # future file breaks this, re-run that comparison before flipping it back.
+        inputs = [variable_map[inp.name] for inp in self.evaluators["sf"].inputs]
+        sf_nom = ak_evaluate(self.evaluators["sf"], *inputs)
+        inputs = [variable_map[inp.name] for inp in self.evaluators["sfunc"].inputs]
+        sf_unc = ak_evaluate(self.evaluators["sfunc"], *inputs)
+        jersf["nom"] = sf_nom
+        jersf["up"] = sf_nom + sf_unc
+        jersf["down"] = sf_nom - sf_unc
+    else:
+        # old layout: nom/up/down live on a "systematic" axis of ScaleFactor
+        for syst in ("nom", "up", "down"):
+            variable_map_syst = dict(variable_map, systematic=syst)
+            inputs = [variable_map_syst[inp.name] for inp in self.evaluators["sf"].inputs]
+            jersf[syst] = ak_evaluate(self.evaluators["sf"], *inputs)
 
     # array with all JER scale factor variations as an additional axis
     # (note: axis needs to be regular for broadcasting to work correctly)
@@ -856,7 +877,21 @@ def jer_setup(self: Calibrator, reqs: dict, inputs: dict, reader_targets: Insert
     jer_keys = {
         "jer": f"{jer_cfg.campaign}_{jer_cfg.version}_MC_PtResolution_{jer_cfg.jet_type}",
         "sf": f"{jer_cfg.campaign}_{jer_cfg.version}_MC_ScaleFactor_{jer_cfg.jet_type}",
+        "sfunc": f"{jer_cfg.campaign}_{jer_cfg.version}_MC_SFUncertainty_{jer_cfg.jet_type}",
     }
+
+    # Newer JME files carry the JER scale factor variations in a dedicated
+    # "*_SFUncertainty_*" correction, and their "*_ScaleFactor_*" has no
+    # "systematic" input at all. Older files put nom/up/down on a systematic axis
+    # of the ScaleFactor correction itself. Detect which layout this file uses.
+    #
+    # This matters because the failure is silent: with the new layout, evaluating
+    # ScaleFactor three times with different "systematic" values simply returns
+    # the same number (the key is never read), so pt_jer_up comes out identical to
+    # the nominal pt and the JER uncertainty vanishes without any error.
+    self.has_sfunc_evaluator = jer_keys["sfunc"] in set(correction_set.keys())
+    if not self.has_sfunc_evaluator:
+        del jer_keys["sfunc"]
 
     # store the evaluators
     self.evaluators = {
